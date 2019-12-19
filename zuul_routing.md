@@ -64,7 +64,8 @@ zuul的SimpleHostRoutingFilter主要用来转发不走eureka的proxy，里头是
 配置自定义的filter
        
     
-    import com.learn.zuul.filter.RewriteSimpleHostRoutingFilter;
+        
+    import com.zhongan.anlink.zuul.filter.CustomerSimpleHostRoutingFilter;
     import org.apache.http.impl.client.CloseableHttpClient;
     import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
     import org.springframework.cloud.commons.httpclient.ApacheHttpClientConnectionManagerFactory;
@@ -77,33 +78,33 @@ zuul的SimpleHostRoutingFilter主要用来转发不走eureka的proxy，里头是
     import org.springframework.context.annotation.Bean;
     import org.springframework.context.annotation.Configuration;
     import org.springframework.context.annotation.Import;
-    
+
     @Configuration
     @Import({
-            HttpClientConfiguration.class })
+        HttpClientConfiguration.class })
     public class CustomerZuulProxyAutoConfiguration extends ZuulProxyAutoConfiguration {
-    
-    
-        @Bean
-        @Override
-        @ConditionalOnMissingBean({SimpleHostRoutingFilter.class, CloseableHttpClient.class})
-        public SimpleHostRoutingFilter simpleHostRoutingFilter(ProxyRequestHelper helper,
-                                                               ZuulProperties zuulProperties,
-                                                               ApacheHttpClientConnectionManagerFactory connectionManagerFactory,
-                                                               ApacheHttpClientFactory httpClientFactory) {
-            return new RewriteSimpleHostRoutingFilter(helper, zuulProperties,
-                    connectionManagerFactory, httpClientFactory);
-        }
-    
-        @Bean
-        @Override
-        @ConditionalOnMissingBean({SimpleHostRoutingFilter.class})
-        public SimpleHostRoutingFilter simpleHostRoutingFilter2(ProxyRequestHelper helper,
-                                                                ZuulProperties zuulProperties,
-                                                                CloseableHttpClient httpClient) {
-            return new RewriteSimpleHostRoutingFilter(helper, zuulProperties,
-                    httpClient);
-        }
-    
+
+
+    @Bean
+    @Override
+    @ConditionalOnMissingBean({SimpleHostRoutingFilter.class, CloseableHttpClient.class})
+    public SimpleHostRoutingFilter simpleHostRoutingFilter(ProxyRequestHelper helper,
+                                                           ZuulProperties zuulProperties,
+                                                           ApacheHttpClientConnectionManagerFactory connectionManagerFactory,
+                                                           ApacheHttpClientFactory httpClientFactory) {
+        return new CustomerSimpleHostRoutingFilter(helper, zuulProperties,
+                connectionManagerFactory, httpClientFactory);
     }
+
+    @Bean
+    @Override
+    @ConditionalOnMissingBean({SimpleHostRoutingFilter.class})
+    public SimpleHostRoutingFilter simpleHostRoutingFilter2(ProxyRequestHelper helper,
+                                                            ZuulProperties zuulProperties,
+                                                            CloseableHttpClient httpClient) {
+        return new CustomerSimpleHostRoutingFilter(helper, zuulProperties,
+                httpClient);
+    }
+
+}
 
