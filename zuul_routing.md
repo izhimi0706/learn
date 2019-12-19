@@ -1,5 +1,5 @@
 ## 网关 zuul自定义SimpleHostRoutingFilter
-zuul的SimpleHostRoutingFilter主要用来转发不走eureka的proxy，里头是使用httpclient来转发请求的，但是有时候我们需要改动相关httpclient的配置，这个时候，就需要修改SimpleHostRoutingFilter了，这里讲一下如何扩展SimpleHostRoutingFilter。
+zuul的SimpleHostRoutingFilter主要用来转发，是使用httpclient来转发请求的，但是有时候我们需要改动相关httpclient的配置，这个时候，就需要修改SimpleHostRoutingFilter了，这里讲一下如何扩展SimpleHostRoutingFilter。
 
 
 
@@ -65,7 +65,7 @@ zuul的SimpleHostRoutingFilter主要用来转发不走eureka的proxy，里头是
        
     
         
-    import com.zhongan.anlink.zuul.filter.CustomerSimpleHostRoutingFilter;
+    import com.izhimi.zuul.filter.CustomerSimpleHostRoutingFilter;
     import org.apache.http.impl.client.CloseableHttpClient;
     import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
     import org.springframework.cloud.commons.httpclient.ApacheHttpClientConnectionManagerFactory;
