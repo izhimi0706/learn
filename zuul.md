@@ -40,11 +40,11 @@
 从threaddump 入手
 线程堆栈关键信息看上面那张图就好，线程正在做的事情是：RibbonRoutingFilter 正在使用 Apache Http Client 将请求数据发送到具体的服务，在获取 HTTP连接时被阻塞。上面截图中部分信息如下：
 
-java.util.concurrent.locks.LockSupport.park()
-java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await()
-org.apache.http.pool.AbstractConnPool.getPoolEntryBlocking()
-org.apache.http.pool.AbstractConnPool$2.get()
-org.apache.http.impl.conn.PoolingHttpClientConnectionManager.leaseConnection()
+    java.util.concurrent.locks.LockSupport.park()
+    java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await()
+    org.apache.http.pool.AbstractConnPool.getPoolEntryBlocking()
+    org.apache.http.pool.AbstractConnPool$2.get()
+    org.apache.http.impl.conn.PoolingHttpClientConnectionManager.leaseConnection()
 
 
 
@@ -72,9 +72,9 @@ Http Client 将 HTTP 连接缓存到了自己的连接池中，各线程需要�
 
 在 org.apache.http.pool.AbstractConnPool (连接池) 中，有几个重要的属性：
 
-private final Set<E> leased;
-private final LinkedList<E> available;
-private final LinkedList<Future<E>> pending;
+    private final Set<E> leased;
+    private final LinkedList<E> available;
+    private final LinkedList<Future<E>> pending;
 
 
 leased：译为租用，即正在使用中的连接
@@ -91,72 +91,72 @@ AbstractConnPool.getPoolEntryBlocking()
 如果有现成的连接，就直接用；如果没有且没有达到连接数量限制，就创建新连接用；如果连接池满了，那就把当前请求对应的线程给阻塞住，并加到pending列表中，等到有连接可用时再来唤醒它。
 
 
-private E getPoolEntryBlocking(final T route, ...
+    private E getPoolEntryBlocking(final T route, ...
         final Future<E> future) throws ... {
-    this.lock.lock();
-    try {
-        // 获取当前 route 的连接池
-        final RouteSpecificPool<T, C, E> pool = getPool(route);
-        E entry;
-        // 死循环获取连接
-        for (;;) {
-            // 1.先尝试从连接池获取连接，死循环用于剔除无效连接
+        this.lock.lock();
+        try {
+            // 获取当前 route 的连接池
+            final RouteSpecificPool<T, C, E> pool = getPool(route);
+            E entry;
+            // 死循环获取连接
             for (;;) {
-                entry = pool.getFree(state);
-                // 连接池没有就直接中断，走下面的创建连接
-                if (entry == null) {
-                    break; 
+                // 1.先尝试从连接池获取连接，死循环用于剔除无效连接
+                for (;;) {
+                    entry = pool.getFree(state);
+                    // 连接池没有就直接中断，走下面的创建连接
+                    if (entry == null) {
+                        break; 
+                    }
+                    // 连接池有连接的话就做下基础校验，确保连接可用
+                    if (entry.isExpired(System.currentTimeMillis())) {
+                        entry.close();
+                    }
+                    if (entry.isClosed()) {
+                        this.available.remove(entry);
+                        pool.free(entry, false);
+                    } else {
+                        break;
+                    }
                 }
-                // 连接池有连接的话就做下基础校验，确保连接可用
-                if (entry.isExpired(System.currentTimeMillis())) {
-                    entry.close();
-                }
-                if (entry.isClosed()) {
-                    this.available.remove(entry);
-                    pool.free(entry, false);
-                } else {
-                    break;
-                }
-            }
             
-            // 2. 从连接池拿到OK的连接，并将连接从available中移到leased
-            if (entry != null) {
-                this.available.remove(entry);
-                this.leased.add(entry);
-                onReuse(entry);
-                return entry;
-            }
-
-            // 3. 判断连接池是否超过50个连接，把多余的销毁掉
-   			...
-
-            // 4. 如果已分配连接小于50，就开始创建新的连接
-            if (pool.getAllocatedCount() < maxPerRoute) {
-				// Http Client有最大连接数限制，如果所有route的连接数没超过，则创建连接并返回
-                if (freeCapacity > 0) {
-                    ...
+                // 2. 从连接池拿到OK的连接，并将连接从available中移到leased
+                if (entry != null) {
+                    this.available.remove(entry);
+                    this.leased.add(entry);
+                    onReuse(entry);
                     return entry;
                 }
-            }
-			// 5. 若已分配连接大于50，用JUC的 Condition.await() 阻塞当前线程，把任务加到pending链表中。
-            // 特别注意：这里属于死循环中，唤醒线程后它又开始走上面的路，开始尝试获取连接
-            try {
-				...
-                pool.queue(future);
-                this.pending.add(future);
+
+                // 3. 判断连接池是否超过50个连接，把多余的销毁掉
+   			    ...
+
+                // 4. 如果已分配连接小于50，就开始创建新的连接
+                if (pool.getAllocatedCount() < maxPerRoute) {
+				    // Http Client有最大连接数限制，如果所有route的连接数没超过，则创建连接并返回
+                    if (freeCapacity > 0) {
+                        ...
+                        return entry;
+                    }
+                }
+			    // 5. 若已分配连接大于50，用JUC的 Condition.await() 阻塞当前线程，把任务加到pending链表中。
+                // 特别注意：这里属于死循环中，唤醒线程后它又开始走上面的路，开始尝试获取连接
+                try {
+				    ...
+                    pool.queue(future);
+                    this.pending.add(future);
+                    ...
+  				    this.condition.await();
+                } finally {
+                    pool.unqueue(future);
+                    this.pending.remove(future);
+                }
                 ...
-  				this.condition.await();
-            } finally {
-                pool.unqueue(future);
-                this.pending.remove(future);
             }
-            ...
+            throw new TimeoutException("Timeout waiting for connection");
+        } finally {
+            this.lock.unlock();
         }
-        throw new TimeoutException("Timeout waiting for connection");
-    } finally {
-        this.lock.unlock();
     }
-}
 
 
 传输数据，这个不多说
@@ -167,35 +167,36 @@ AbstractConnPool.release()
 
 如果连接用完后还可以用，就丢到连接池(available链表)中以便复用；如果不可用，就关闭连接。
 如果还有等待处理的任务，就从pending集合中取一个出来。用 condition.signalAll() 来唤醒所有 WAITING 的线程。
-public void release(final E entry, final boolean reusable) {
-    this.lock.lock();
-    try {
-        if (this.leased.remove(entry)) {
-            // 连接可用则复用，不可用则close
-            final RouteSpecificPool<T, C, E> pool = getPool(entry.getRoute());
-            pool.free(entry, reusable);
-            if (reusable && !this.isShutDown) {
-                this.available.addFirst(entry);
-            } else {
-                entry.close();
+        
+    public void release(final E entry, final boolean reusable) {
+        this.lock.lock();
+        try {
+            if (this.leased.remove(entry)) {
+                // 连接可用则复用，不可用则close
+                final RouteSpecificPool<T, C, E> pool = getPool(entry.getRoute());
+                pool.free(entry, reusable);
+                if (reusable && !this.isShutDown) {
+                    this.available.addFirst(entry);
+                } else {
+                    entry.close();
+                }
+                onRelease(entry);
+                // 从当前Route的连接池中取下一个pending的任务，如果有，则condition.signalAll()
+                Future<E> future = pool.nextPending();
+                if (future != null) {
+                    this.pending.remove(future);
+                } else {
+                    future = this.pending.poll();
+                }
+                // 注意：这里的 signalAll() 和 获取连接的 await() 就衔接起来了。
+                if (future != null) {
+                    this.condition.signalAll();
+                }
             }
-            onRelease(entry);
-            // 从当前Route的连接池中取下一个pending的任务，如果有，则condition.signalAll()
-            Future<E> future = pool.nextPending();
-            if (future != null) {
-                this.pending.remove(future);
-            } else {
-                future = this.pending.poll();
-            }
-            // 注意：这里的 signalAll() 和 获取连接的 await() 就衔接起来了。
-            if (future != null) {
-                this.condition.signalAll();
-            }
+        } finally {
+            this.lock.unlock();
         }
-    } finally {
-        this.lock.unlock();
     }
-}
 
 下面两行代码尤为重要：
 
@@ -228,14 +229,14 @@ jmeter 模拟 500 用户并发访问网关后的服务
 
 猜测是Http Client没有释放连接，因为在看了释放连接源码后，发现释放连接中做了几个重要的事情，会影响到连接的获取：
 
-pool.free(entry, reusable);
-// free 方法代码
-public void free(final E entry, final boolean reusable) {
-    final boolean found = this.leased.remove(entry);
-    if (reusable) {
-        this.available.addFirst(entry);
+    pool.free(entry, reusable);
+    // free 方法代码
+    public void free(final E entry, final boolean reusable) {
+        final boolean found = this.leased.remove(entry);
+        if (reusable) {
+            this.available.addFirst(entry);
+        }
     }
-}
 
 一是会把连接从 leased 中移除，这样可用连接数加1，已占用连接数减1. 特别注意的是：在获取连接时，如果已用连接大于50个，线程就await阻塞。因此，一旦这里出问题，50个连接的名额很快就霍霍完，后续的所有线程逐渐全部阻塞掉，直到应用瘫痪。
 
@@ -247,13 +248,14 @@ this.condition.signalAll();
 接着，调试了一下，释放连接是在Zuul的 SendResponseFilter 中处理的，它会把具体服务返回的数据写到response中去，当检测到inputStream中数据读取完毕后，http client会自动释放连接。
 
 //SendResponseFilter调用writeResponse方法将数据写入response
-private void writeResponse(InputStream zin, OutputStream out) throws Exception {
-	byte[] bytes = buffers.get();
-	int bytesRead = -1;
-	while ((bytesRead = zin.read(bytes)) != -1) {
-		out.write(bytes, 0, bytesRead);
-	}
-}
+        
+    private void writeResponse(InputStream zin, OutputStream out) throws Exception {
+	    byte[] bytes = buffers.get();
+	    int bytesRead = -1;
+	    while ((bytesRead = zin.read(bytes)) != -1) {
+		    out.write(bytes, 0, bytesRead);
+	    }
+    }
 
 而这个 Inputstream有点特殊，是 EofSensorInputStream，EofSensor可以理解为能敏锐的嗅到数据读取完毕，然后可以干点事情。是的，它干的事情就是：释放连接!
 
@@ -261,8 +263,8 @@ private void writeResponse(InputStream zin, OutputStream out) throws Exception {
 
 下面做个小实验：自定义一个Filter，在RibbonRoutingFilter后运行，就负责抛出异常。
 
-@Component
-public class MyFilter extends ZuulFilter {
+    @Component
+    public class MyFilter extends ZuulFilter {
 
     public volatile static int count = 0;
 
@@ -283,7 +285,7 @@ public class MyFilter extends ZuulFilter {
         System.out.println(tname + ": " + count);
         throw new RuntimeException("error occurred:" + tname);
     }
-}
+    }
 
 
 这下，问题重现了。问题出现的过程如下：
@@ -294,20 +296,20 @@ public class MyFilter extends ZuulFilter {
 
 如果你有兴趣，很简单就可以重现该问题。我的 Spring Cloud 版本为(有点旧，也没升级)：
 
-<parent>
-	<groupId>org.springframework.boot</groupId>
-	<artifactId>spring-boot-starter-parent</artifactId>
-	<version>1.5.9.RELEASE</version>
-	<relativePath/> 
-</parent>
+    <parent>
+	    <groupId>org.springframework.boot</groupId>
+	    <artifactId>spring-boot-starter-parent</artifactId>
+	    <version>1.5.9.RELEASE</version>
+	    <relativePath/> 
+    </parent>
 
 对应的httpcompoents版本为4.4.8(会自动引入，不用单独添加)
 
-<parent>
-	<groupId>org.apache.httpcomponents</groupId>
-	<artifactId>httpcore</artifactId>
-	<version>4.4.8</version>
-</parent>
+    <parent>
+	    <groupId>org.apache.httpcomponents</groupId>
+	    <artifactId>httpcore</artifactId>
+	    <version>4.4.8</version>
+    </parent>
 
 如何解决这个问题？
 1.Zuul 除Http Client外，还支持OkHttp、RestClient。我用OkHttp做了测试，没有任何问题。
@@ -316,8 +318,8 @@ public class MyFilter extends ZuulFilter {
 
 ribbon.httpclient.enabled=false
 ribbon.okhttp.enabled=true
-1
-2
+
+
 2.在自定义的Zuul Filter中，严格执行try {} catch{} 语法，捕获自定义Filter中出现的问题。本文出现的问题，就是因为自定义Filter没有这么做.
 
 因为这种场景下，只要请求数稍微多点，做下压力测试，问题就出来了。不过也可以根据实际业务场景做限流。
@@ -329,18 +331,18 @@ ribbon.okhttp.enabled=true
 
 我想看看在较大流量获取连接时，下面函数中的各种因子是怎么变化的，又是怎么跑到阻塞逻辑中去的。因为有时光看代码时难以理解逻辑，通过一些实际的数据可以辅助理解。
 
-private E getPoolEntryBlocking(){
-    ...
-    this.condition.await();
-    ...
-}
+    private E getPoolEntryBlocking(){
+        ...
+        this.condition.await();
+        ...
+    }
 
 在IDEA，我们可以查看源码，但无法修改源码，下面是我偶尔用的一个方法：
 
 目标：修改 httpcore-4.4.8.jar 中 AbstractConnPool类的getPoolEntryBlocking函数，在其中加入自己的调试信息。
 
-package org.apache.http.pool;
-public abstract class AbstractConnPool {...
+    package org.apache.http.pool;
+    public abstract class AbstractConnPool {...
 
 步骤：
 
