@@ -59,7 +59,7 @@ Apache Http Client 的连接池
 概念
 Http Client 将 HTTP 连接缓存到了自己的连接池中，各线程需要传输数据时就可以复用这些HTTP连接，可类比JDBC连接池、线程池等。下面是我画的Http Client连接池概念的简图：
 
-   ![avatar](https://img-blog.csdnimg.cn/20191219161127769.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ljYW5nZmVuZw==,size_16,color_FFFFFF,t_70)
+   ![avatar](https://img-blog.csdnimg.cn/20191219161127769.png)
 
 利用上图辅助理解，由于Http Client 可能会调用多个服务，因此它对不同的服务(就是IP+Port)有独立的连接池，这些独立连接池的并集就是 Http Client 的连接池概念。
 
@@ -83,7 +83,7 @@ Http Client 将 HTTP 连接缓存到了自己的连接池中，各线程需要�
     
 结合下面这张图介绍下处理流程和关键的源码，同时演示leased、available、pending的变化。
 
-   ![avatar](https://img-blog.csdnimg.cn/20191219161222347.png?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ljYW5nZmVuZw==,size_16,color_FFFFFF,t_70)
+   ![avatar](https://img-blog.csdnimg.cn/20191219161222347.png)
 
 获取连接
 AbstractConnPool.getPoolEntryBlocking()
@@ -308,7 +308,7 @@ tomcat 配置如下
 
 然后我把zuul的超时时间改大60s，下游服务睡眠60s。前面200个请求，每个leased连接数量每次加1，直到200后续的请求进入pending，直到1000个连接全部被占满，如下图。
 
-![avatar](https://img-blog.csdnimg.cn/20191219161258327.jpg?x-oss-process=image/watermark,type_ZmFuZ3poZW5naGVpdGk,shadow_10,text_aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L2ljYW5nZmVuZw==,size_16,color_FFFFFF,t_70)
+![avatar](https://img-blog.csdnimg.cn/20191219161258327.jpg)
 
 #### 治标不治本
 如何来解决这个问题呢？加大线程加大连接！！！
