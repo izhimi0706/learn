@@ -28,7 +28,7 @@
 
 200 个线程状态都是 WAITING，在等待唤醒，都是 parking to wait for <0x0000000704bcc698>，如下图：
 
-![avatar](img/f1ff71027a064bf4b2dd93683b70c044.png)
+   ![avatar](img/f1ff71027a064bf4b2dd93683b70c044.png)
 
 处理：这种情景首次出现，不过能判定是网关问题。摘除问题网关流量并切到其他网关后，获取了问题网关的 heapdump，暂不kill掉问题网关，留着用于排查问题。
 
@@ -59,7 +59,7 @@ Apache Http Client 的连接池
 概念
 Http Client 将 HTTP 连接缓存到了自己的连接池中，各线程需要传输数据时就可以复用这些HTTP连接，可类比JDBC连接池、线程池等。下面是我画的Http Client连接池概念的简图：
 
-
+   ![avatar](img/d6b4bd1776eb4fb68d39f4d3569489a7.png)
 
 利用上图辅助理解，由于Http Client 可能会调用多个服务，因此它对不同的服务(就是IP+Port)有独立的连接池，这些独立连接池的并集就是 Http Client 的连接池概念。
 
@@ -77,11 +77,13 @@ Http Client 将 HTTP 连接缓存到了自己的连接池中，各线程需要�
     private final LinkedList<Future<E>> pending;
 
 
-leased：译为租用，即正在使用中的连接
-available：当前可以使用的连接，即空闲的连接
-pending：等待处理的请求(任务)，封装成了 JUC 中的 Future
+    leased：译为租用，即正在使用中的连接
+    available：当前可以使用的连接，即空闲的连接
+    pending：等待处理的请求(任务)，封装成了 JUC 中的 Future
+    
 结合下面这张图介绍下处理流程和关键的源码，同时演示leased、available、pending的变化。
 
+   ![avatar](img/d6b4bd1776eb4fb68d39f4d3569489a7.png)
 
 获取连接
 AbstractConnPool.getPoolEntryBlocking()
@@ -242,118 +244,80 @@ jmeter 模拟 500 用户并发访问网关后的服务
 
 二是会唤醒所有阻塞的线程，如果没有释放连接，也就不会执行线程唤醒逻辑，那被阻塞的线程就只有长眠地下了。
 
-this.condition.signalAll();
+    this.condition.signalAll();
 
+网上查了下，发现有不少小伙伴是说在Filter执行过程中，如果发生异常，就直奔SendErrorFilter中去做异常处理了，没SendResponseFilter啥事。因此，可以推断：如果Zuul Filter抛出异常，那释放连接过程就不会执行。
+而我的情况是有做try {} catch{} 而且发现服务器没有 异常。代码也是很简单没有做过多的处理。
 
-接着，调试了一下，释放连接是在Zuul的 SendResponseFilter 中处理的，它会把具体服务返回的数据写到response中去，当检测到inputStream中数据读取完毕后，http client会自动释放连接。
+于是我怀疑是否是高峰时段，下流服务响应时间过长。一直占这连接。难道下流服务抛异常没有正常释放？
 
-//SendResponseFilter调用writeResponse方法将数据写入response
-        
-    private void writeResponse(InputStream zin, OutputStream out) throws Exception {
-	    byte[] bytes = buffers.get();
-	    int bytesRead = -1;
-	    while ((bytesRead = zin.read(bytes)) != -1) {
-		    out.write(bytes, 0, bytesRead);
-	    }
+下面做个小实验：自定义一个网关下游服务，一个接口随机睡眠（1-15）秒。一个抛异常接口；
+
+    /**
+     * 网关压测模拟下游服务处理
+     * @return
+     */
+    @GetMapping(value="/v1/admin/test")
+    public String test(){
+        try {
+            long millis = random(15,1);
+            System.out.println(millis);
+            Thread.sleep(millis);
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return "OK";
     }
 
-而这个 Inputstream有点特殊，是 EofSensorInputStream，EofSensor可以理解为能敏锐的嗅到数据读取完毕，然后可以干点事情。是的，它干的事情就是：释放连接!
-
-问题有点眉头了，在Zuul Filter中，有个规矩：在Filter执行过程中，如果发生异常，就直奔SendErrorFilter中去做异常处理了，没SendResponseFilter啥事。因此，可以推断：如果Zuul Filter抛出异常，那释放连接过程就不会执行。
-
-下面做个小实验：自定义一个Filter，在RibbonRoutingFilter后运行，就负责抛出异常。
-
-    @Component
-    public class MyFilter extends ZuulFilter {
-
-    public volatile static int count = 0;
-
-    @Override
-    public String filterType() {
-        return FilterConstants.POST_TYPE;
+    /**
+     * 网关压测抛异常接口
+     * @return
+     */
+    @GetMapping(value="/v1/admin/err")
+    public void err(){
+        throw new RuntimeException();
     }
+
+    private static int random(int max,int min){
+        int ran = (int) (Math.random()*(max-min)+min);
+        return ran * 1000;
+    }
+
+zuul 配置如下
     
-    @Override
-    public int filterOrder() {
-        return FilterConstants.RIBBON_ROUTING_FILTER_ORDER + 1;
-    }
-	...
-    @Override
-    public Object run() {
-        count++;
-        String tname = Thread.currentThread().getName();
-        System.out.println(tname + ": " + count);
-        throw new RuntimeException("error occurred:" + tname);
-    }
-    }
+    zuul:
+      routes:
+        test:
+          path: /v1/**
+          url: http://localhost:8080/v1/
+      host:
+        connect-timeout-millis: 10000
+        socket-timeout-millis: 10000
+        maxTotalConnections: 1000
+        maxPerRouteConnections: 200
+tomcat 配置如下
+
+    server:
+      tomcat:
+        uri-encoding: UTF-8
+        max-threads: 200
+        max-connections: 1000
+       
+当准备就系后启动网关服务，和下游服务。调用【/v1/admin/err】debug发现能正常释放。那么可能是下游连接没有释放？于是开始压测 【/v1/admin/test】 发现等一段时间后所有请求都会await阻塞住。所以后续的请求都会被阻塞，出现本文开头描绘的场景。
+由于 tomcat 200个工作线程全部阻塞，最大连接全部被占满。将不再响应任何请求，因此应用就开始不理任何人了，它既不消耗资源，也不干活，因为它的手下们(工作线程)都 "中毒"休眠了。
 
 
-这下，问题重现了。问题出现的过程如下：
+然后我把zuul的超时时间改大60s，下游服务睡眠60s。前面200个请求，每个leased连接数量每次加1，直到200后续的请求进入pending，直到1000个连接全部被占满，如下图。
 
-前面50个请求，每个都出错，出错后没释放连接，导致leased连接数量每次加1，直到50。这50个线程当然不会出任何问题
-不过，当leased的连接数达到 route 的最大数量限制默认值 50 后，后续所有请求都会await阻塞住。所以后续的200个请求都会被阻塞，出现本文开头描绘的场景。
-由于 tomcat 200个工作线程全部阻塞，将不再响应任何请求，因此应用就开始不理任何人了，它既不消耗资源，也不干活，因为它的手下们(工作线程)都 "中毒"休眠了。
+![avatar](img/1576739381.jpg)
 
-如果你有兴趣，很简单就可以重现该问题。我的 Spring Cloud 版本为(有点旧，也没升级)：
+如何来解决这个问题呢？加大线程加大连接！！！
+   加大线程加大连接如果设置不合适，当高峰流量过来后，容器内存过小。后端服务连接不是释放很容易fgc。
+   如果容器内存足够，连接数打满后容器不会fgc，也不干活。因为它的手下们(工作线程)都 "中毒"休眠了。
 
-    <parent>
-	    <groupId>org.springframework.boot</groupId>
-	    <artifactId>spring-boot-starter-parent</artifactId>
-	    <version>1.5.9.RELEASE</version>
-	    <relativePath/> 
-    </parent>
-
-对应的httpcompoents版本为4.4.8(会自动引入，不用单独添加)
-
-    <parent>
-	    <groupId>org.apache.httpcomponents</groupId>
-	    <artifactId>httpcore</artifactId>
-	    <version>4.4.8</version>
-    </parent>
 
 如何解决这个问题？
-1.Zuul 除Http Client外，还支持OkHttp、RestClient。我用OkHttp做了测试，没有任何问题。
 
-引入OkHttp的maven依赖，然后加入下面的配置，禁用httpclient，启用OkHttp
+1. 如果业务允许的情况下，可以根据实际业务场景做限流。
+2. [网关 zuul 自定义 SimpleHostRoutingFilter](/zuul_routing.md). 提前预警。
 
-ribbon.httpclient.enabled=false
-ribbon.okhttp.enabled=true
-
-
-2.在自定义的Zuul Filter中，严格执行try {} catch{} 语法，捕获自定义Filter中出现的问题。本文出现的问题，就是因为自定义Filter没有这么做.
-
-因为这种场景下，只要请求数稍微多点，做下压力测试，问题就出来了。不过也可以根据实际业务场景做限流。
-
-如何修改源码并运行？
-最后，分享一个小技巧。
-
-有些场景正常的调试不好定位问题，像这个问题就没法去单步调试，如果能修改第三方组件的源码，在运行时来判断问题就比较方便。以本文问题为例:
-
-我想看看在较大流量获取连接时，下面函数中的各种因子是怎么变化的，又是怎么跑到阻塞逻辑中去的。因为有时光看代码时难以理解逻辑，通过一些实际的数据可以辅助理解。
-
-    private E getPoolEntryBlocking(){
-        ...
-        this.condition.await();
-        ...
-    }
-
-在IDEA，我们可以查看源码，但无法修改源码，下面是我偶尔用的一个方法：
-
-目标：修改 httpcore-4.4.8.jar 中 AbstractConnPool类的getPoolEntryBlocking函数，在其中加入自己的调试信息。
-
-    package org.apache.http.pool;
-    public abstract class AbstractConnPool {...
-
-步骤：
-
-1.在当前项目创建一个org.apache.http.pool.AbstractConnPool类，拷贝AbstractConnPool中的代码。
-
-2.由于项目有所有依赖，可以直接修改自己创建的AbstractConnPool类
-
-3.编译项目，将AbstractConnPool.class文件拷贝出来
-
-4.将 org/apache/httpcomponents/httpcore/4.4.8/httpcore-4.4.8.jar 拷贝出来，用7zip或其他解压工具打开，将AbstractConnPool.class替换掉jar包中的类
-
-5.用修改后的jar包替换掉原来的jar包
-
-6.运行项目，就可以看到自己的调试信息了。需要注意的是，用IDE打开这个类是看不到你加的代码的，因为IDE打开的是 httpcore-4.4.8-sources.jar，换成其他反编译工具直接看class文件是OK的
