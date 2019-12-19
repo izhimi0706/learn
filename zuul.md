@@ -28,7 +28,7 @@
 
 200 个线程状态都是 WAITING，在等待唤醒，都是 parking to wait for <0x0000000704bcc698>，如下图：
 
-![avatar](img/f1ff71027a064bf4b2dd93683b70c044.png)
+![avatar](/img/f1ff71027a064bf4b2dd93683b70c044.png)
 
 处理：这种情景首次出现，不过能判定是网关问题。摘除问题网关流量并切到其他网关后，获取了问题网关的 heapdump，暂不kill掉问题网关，留着用于排查问题。
 
