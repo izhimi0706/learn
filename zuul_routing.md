@@ -3,7 +3,7 @@ zuul的SimpleHostRoutingFilter主要用来转发，是使用httpclient来转发�
 
 
 
-自定义SimpleHostRoutingFilter    
+自定义SimpleHostRoutingFilter   ，在run是可查看当前连接占用情况等，提前预警；或做其他操作 
     
     
     
@@ -55,6 +55,7 @@ zuul的SimpleHostRoutingFilter主要用来转发，是使用httpclient来转发�
             PoolingHttpClientConnectionManager clientConnectionManager = (PoolingHttpClientConnectionManager)connectionManager ;
             PoolStats pool = clientConnectionManager.getTotalStats();
             System.out.println(JSON.toJSONString(pool));
+            //TODO
             return super.run();
         }
     
