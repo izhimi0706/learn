@@ -319,5 +319,5 @@ tomcat 配置如下
 如何解决这个问题？
 
 1. 如果业务允许的情况下，可以根据实际业务场景做限流。
-2. [网关 zuul 自定义 SimpleHostRoutingFilter](/zuul_routing.md). 提前预警。
+2. [网关 zuul 自定义 SimpleHostRoutingFilter](/zuul_routing.md). 提前查看连接占用情况预警。
 
