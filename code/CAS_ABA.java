@@ -56,6 +56,5 @@ public class BaseTest {
 
             System.out.println(atomicStampedReference.compareAndSet(100,101,nowStamp,atomicStampedReference.getStamp()+1));
         },"T4").start();
-
     }
 }
